@@ -1,26 +1,146 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+
 @import "tailwindcss";
 
+@theme {
+  --color-bg-dark: #070B14;
+  --color-surface-dark: #101624;
+  --color-brand-primary: #5B8CFF;
+  --color-brand-secondary: #8B5CF6;
+  --color-brand-accent: #00E5FF;
+  --color-brand-success: #4ADE80;
+  
+  --color-text-primary: #FFFFFF;
+  --color-text-secondary: #C7D2FE;
+  --color-text-muted: #94A3B8;
+
+  --font-space: 'Space Grotesk', sans-serif;
+  --font-inter: 'Inter', sans-serif;
+
+  --radius-custom-sm: 12px;
+  --radius-custom-md: 20px;
+  --radius-custom-lg: 28px;
+}
+
+/* Custom properties for glassmorphism and animations */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --font-space: 'Space Grotesk', sans-serif;
+  --font-inter: 'Inter', sans-serif;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+html, body {
+  background-color: #070B14;
+  color: #FFFFFF;
+  font-family: var(--font-inter);
+  overflow-x: hidden;
+  margin: 0;
+  padding: 0;
+  scroll-behavior: auto; /* Handled by Lenis */
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* Smooth Scrolling Custom Tweaks */
+html.lenis {
+  height: auto;
+}
+
+.lenis-clean-scroll {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none;  /* IE and Edge */
+}
+.lenis-clean-scroll::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Opera */
+}
+
+/* Hide scrollbar completely to match high-end templates */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #070B14;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(91, 140, 255, 0.2);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(91, 140, 255, 0.5);
+}
+
+/* Glassmorphism Utilities */
+.glass-panel {
+  background: rgba(16, 22, 36, 0.4);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-panel-hover {
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.glass-panel-hover:hover {
+  background: rgba(16, 22, 36, 0.6);
+  border-color: rgba(91, 140, 255, 0.3);
+  box-shadow: 0 10px 40px -10px rgba(91, 140, 255, 0.15);
+}
+
+/* Animated gradient borders */
+.animated-gradient-border {
+  position: relative;
+  background: #101624;
+  background-clip: padding-box;
+  border: 1px solid transparent;
+  border-radius: 24px;
+}
+
+.animated-gradient-border::after {
+  position: absolute;
+  top: -1px; bottom: -1px;
+  left: -1px; right: -1px;
+  background: linear-gradient(90deg, #5B8CFF, #8B5CF6, #00E5FF, #5B8CFF);
+  background-size: 300% 300%;
+  content: '';
+  z-index: -1;
+  border-radius: 24px;
+  animation: borderGradientRun 4s linear infinite;
+  opacity: 0.15;
+  transition: opacity 0.3s ease;
+}
+
+.animated-gradient-border:hover::after {
+  opacity: 0.5;
+}
+
+@keyframes borderGradientRun {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Glow effects */
+.glow-primary {
+  box-shadow: 0 0 40px -5px rgba(91, 140, 255, 0.3);
+}
+
+.glow-secondary {
+  box-shadow: 0 0 40px -5px rgba(139, 92, 246, 0.3);
+}
+
+.glow-accent {
+  box-shadow: 0 0 40px -5px rgba(0, 229, 255, 0.3);
+}
+
+/* Micro interaction tags */
+.magnetic-wrap {
+  display: inline-block;
+  position: relative;
+}
+
+/* Hide default cursor on desktop */
+@media (min-width: 1024px) {
+  body {
+    cursor: none;
   }
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  a, button, select, input, textarea, [role="button"] {
+    cursor: none;
+  }
 }
