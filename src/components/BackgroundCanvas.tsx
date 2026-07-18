@@ -2,14 +2,85 @@
 
 import React, { useEffect, useRef } from "react";
 
-interface Blob {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  radius: number;
-  color: string;
-}
+const vsSource = `
+  attribute vec2 a_position;
+  varying vec2 v_texCoord;
+  void main() {
+    v_texCoord = a_position * 0.5 + 0.5;
+    gl_Position = vec4(a_position, 0.0, 1.0);
+  }
+`;
+
+const fsSource = `
+  precision highp float;
+  uniform float u_time;
+  uniform vec2 u_resolution;
+  uniform vec2 u_mouse;
+  varying vec2 v_texCoord;
+
+  // Simplex 2D noise implementation for fluid waves
+  vec3 permute(vec3 x) { return mod(((x*34.0)+1.0)*x, 289.0); }
+  float snoise(vec2 v){
+    const vec4 C = vec4(0.211324865405187, 0.366025403784439,
+             -0.577350269189626, 0.024390243902439);
+    vec2 i  = floor(v + dot(v, C.yy) );
+    vec2 x0 = v -   i + dot(i, C.xx);
+    vec2 i1;
+    i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+    vec4 x12 = x0.xyxy + C.xxzz;
+    x12.xy -= i1;
+    i = mod(i, 289.0);
+    vec3 p = permute( permute( i.y + vec3(0.0, i1.y, 1.0 ))
+    + i.x + vec3(0.0, i1.x, 1.0 ));
+    vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy),
+      dot(x12.zw,x12.zw)), 0.0);
+    m = m*m ;
+    m = m*m ;
+    vec3 x = 2.0 * fract(p * C.www) - 1.0;
+    vec3 h = abs(x) - 0.5;
+    vec3 ox = floor(x + 0.5);
+    vec3 a0 = x - ox;
+    m *= 1.79284291400159 - 0.85373472095314 * ( a0*a0 + h*h );
+    vec3 g;
+    g.x  = a0.x  * x0.x  + h.x  * x0.y;
+    g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+    return 130.0 * dot(m, g);
+  }
+
+  void main() {
+      vec2 uv = v_texCoord;
+      float time = u_time * 0.15; // Elegant slow fluid movement
+      
+      // Interactive mouse hover distortion
+      vec2 normMouse = u_mouse / u_resolution;
+      float mouseDist = length(uv - normMouse);
+      float mouseInfluence = smoothstep(0.4, 0.0, mouseDist) * 0.15;
+
+      // Aurora colors based on brand palette
+      vec3 col1 = vec3(0.357, 0.549, 1.0); // #5B8CFF Blue
+      vec3 col2 = vec3(0.545, 0.361, 0.965); // #8B5CF6 Purple
+      vec3 col3 = vec3(0.0, 0.898, 1.0); // #00E5FF Cyan
+      vec3 bg = vec3(0.027, 0.043, 0.078); // #070B14 Dark background
+
+      // Multi-frequency noise sampling for natural fluid dynamics
+      float n1 = snoise(uv * 2.0 + time + mouseInfluence);
+      float n2 = snoise(uv * 3.0 - time * 1.5 - mouseInfluence);
+      float n3 = snoise(uv * 1.5 + time * 0.8 + mouseInfluence * 0.5);
+      
+      float f = n1 * 0.5 + n2 * 0.3 + n3 * 0.2;
+      f = smoothstep(-0.2, 0.8, f);
+      
+      vec3 color = mix(bg, col1, f * 0.35);
+      color = mix(color, col2, n2 * 0.25);
+      color = mix(color, col3, n3 * 0.18);
+      
+      // Vignette to blend the edges deeply into the layout
+      float d = length(uv - 0.5);
+      color *= 1.0 - d * 0.45;
+      
+      gl_FragColor = vec4(color, 1.0);
+  }
+`;
 
 interface Particle {
   x: number;
@@ -18,151 +89,133 @@ interface Particle {
   speedX: number;
   speedY: number;
   alpha: number;
-  decay: number;
 }
 
 export default function BackgroundCanvas() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const glCanvasRef = useRef<HTMLCanvasElement>(null);
+  const particlesCanvasRef = useRef<HTMLCanvasElement>(null);
   const mouseRef = useRef({ x: 0, y: 0, targetX: 0, targetY: 0 });
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    const glCanvas = glCanvasRef.current;
+    const pCanvas = particlesCanvasRef.current;
+    if (!glCanvas || !pCanvas) return;
 
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    const gl = glCanvas.getContext("webgl") || glCanvas.getContext("experimental-webgl") as WebGLRenderingContext | null;
+    const ctx = pCanvas.getContext("2d");
+    if (!gl || !ctx) return;
 
-    let animationFrameId: number;
-    let width = (canvas.width = window.innerWidth);
-    let height = (canvas.height = window.innerHeight);
+    let animId: number;
+    let width = (glCanvas.width = pCanvas.width = window.innerWidth);
+    let height = (glCanvas.height = pCanvas.height = window.innerHeight);
 
-    // Responsive resize handler
-    const handleResize = () => {
-      width = canvas.width = window.innerWidth;
-      height = canvas.height = window.innerHeight;
-    };
-    window.addEventListener("resize", handleResize);
-
-    // Track mouse position
+    // Track mouse coordinates
     const handleMouseMove = (e: MouseEvent) => {
       mouseRef.current.targetX = e.clientX;
-      mouseRef.current.targetY = e.clientY;
+      // WebGL Y axis goes from bottom to top (inverted compared to screen coordinates)
+      mouseRef.current.targetY = window.innerHeight - e.clientY;
     };
     window.addEventListener("mousemove", handleMouseMove);
 
-    // 1. Initialize Aurora blobs
-    // Using HSL for vibrant, blending colors: Blue, Purple, Cyan
-    const blobs: Blob[] = [
-      {
-        x: width * 0.25,
-        y: height * 0.3,
-        vx: 0.4,
-        vy: 0.3,
-        radius: Math.min(width, height) * 0.4,
-        color: "rgba(91, 140, 255, 0.12)", // #5B8CFF Blue
-      },
-      {
-        x: width * 0.75,
-        y: height * 0.4,
-        vx: -0.35,
-        vy: 0.45,
-        radius: Math.min(width, height) * 0.45,
-        color: "rgba(139, 92, 246, 0.12)", // #8B5CF6 Purple
-      },
-      {
-        x: width * 0.5,
-        y: height * 0.8,
-        vx: 0.3,
-        vy: -0.3,
-        radius: Math.min(width, height) * 0.38,
-        color: "rgba(0, 229, 255, 0.1)", // #00E5FF Cyan
-      },
-    ];
+    const handleResize = () => {
+      width = glCanvas.width = pCanvas.width = window.innerWidth;
+      height = glCanvas.height = pCanvas.height = window.innerHeight;
+      gl.viewport(0, 0, width, height);
+    };
+    window.addEventListener("resize", handleResize);
 
-    // 2. Initialize floating particles
-    const particlesCount = 60;
+    // 1. WebGL Shader compilation
+    const compileShader = (type: number, src: string): WebGLShader | null => {
+      const shader = gl.createShader(type);
+      if (!shader) return null;
+      gl.shaderSource(shader, src);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error("Shader compile error:", gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+      }
+      return shader;
+    };
+
+    const vs = compileShader(gl.VERTEX_SHADER, vsSource);
+    const fs = compileShader(gl.FRAGMENT_SHADER, fsSource);
+    if (!vs || !fs) return;
+
+    const program = gl.createProgram();
+    if (!program) return;
+    gl.attachShader(program, vs);
+    gl.attachShader(program, fs);
+    gl.linkProgram(program);
+
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      console.error("Program link error:", gl.getProgramInfoLog(program));
+      return;
+    }
+    gl.useProgram(program);
+
+    // Quad geometry (covers the whole screen)
+    const positionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    const positions = new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]);
+    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+
+    const positionLoc = gl.getAttribLocation(program, "a_position");
+    gl.enableVertexAttribArray(positionLoc);
+    gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, 0, 0);
+
+    const uTimeLoc = gl.getUniformLocation(program, "u_time");
+    const uResLoc = gl.getUniformLocation(program, "u_resolution");
+    const uMouseLoc = gl.getUniformLocation(program, "u_mouse");
+
+    // 2. Initialize Overlay Particles
+    const particlesCount = 40;
     const particles: Particle[] = [];
     for (let i = 0; i < particlesCount; i++) {
       particles.push({
         x: Math.random() * width,
         y: Math.random() * height,
-        size: Math.random() * 2 + 0.5,
-        speedX: (Math.random() - 0.5) * 0.3,
-        speedY: -Math.random() * 0.4 - 0.1,
-        alpha: Math.random() * 0.5 + 0.1,
-        decay: Math.random() * 0.002 + 0.001,
+        size: Math.random() * 1.5 + 0.5,
+        speedX: (Math.random() - 0.5) * 0.2,
+        speedY: -Math.random() * 0.3 - 0.1,
+        alpha: Math.random() * 0.35 + 0.15,
       });
     }
 
-    // Animation loop
-    const animate = () => {
-      // Clear with very slight transparency to leave a minute trail
-      ctx.fillStyle = "#070B14";
-      ctx.fillRect(0, 0, width, height);
+    // Animation Tick
+    const render = (time: number) => {
+      // --- Pass 1: WebGL Shader ---
+      gl.viewport(0, 0, glCanvas.width, glCanvas.height);
+      gl.clear(gl.COLOR_BUFFER_BIT);
 
-      // Lerp mouse coordinates
+      // Lerp mouse coordinates smoothly
       mouseRef.current.x += (mouseRef.current.targetX - mouseRef.current.x) * 0.08;
       mouseRef.current.y += (mouseRef.current.targetY - mouseRef.current.y) * 0.08;
 
-      // Draw and move blobs
-      ctx.globalCompositeOperation = "screen";
-      blobs.forEach((blob) => {
-        // Move blob
-        blob.x += blob.vx;
-        blob.y += blob.vy;
+      gl.useProgram(program);
+      gl.uniform1f(uTimeLoc, time * 0.001);
+      gl.uniform2f(uResLoc, glCanvas.width, glCanvas.height);
+      gl.uniform2f(uMouseLoc, mouseRef.current.x, mouseRef.current.y);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-        // Bounce on borders
-        if (blob.x - blob.radius < 0 || blob.x + blob.radius > width) blob.vx *= -1;
-        if (blob.y - blob.radius < 0 || blob.y + blob.radius > height) blob.vy *= -1;
-
-        // Interactive mouse pull
-        const dx = mouseRef.current.x - blob.x;
-        const dy = mouseRef.current.y - blob.y;
-        const distance = Math.hypot(dx, dy);
-        if (distance < width * 0.4) {
-          blob.x += dx * 0.005;
-          blob.y += dy * 0.005;
-        }
-
-        // Draw radial gradient for aurora
-        const gradient = ctx.createRadialGradient(
-          blob.x,
-          blob.y,
-          0,
-          blob.x,
-          blob.y,
-          blob.radius
-        );
-        gradient.addColorStop(0, blob.color);
-        gradient.addColorStop(0.5, blob.color.replace("0.1", "0.04"));
-        gradient.addColorStop(1, "rgba(7, 11, 20, 0)");
-
-        ctx.fillStyle = gradient;
-        ctx.beginPath();
-        ctx.arc(blob.x, blob.y, blob.radius, 0, Math.PI * 2);
-        ctx.fill();
-      });
-
-      // Restore default composite operation for particles
-      ctx.globalCompositeOperation = "source-over";
-
-      // Draw and animate particles
+      // --- Pass 2: 2D Floating Particles ---
+      ctx.clearRect(0, 0, width, height);
       particles.forEach((p) => {
-        // Drifting animation
         p.x += p.speedX;
         p.y += p.speedY;
 
-        // Mouse displacement
+        // Displace particles slightly away from mouse coordinates (converted to 2D screen coordinate space)
+        const screenMouseY = height - mouseRef.current.y;
         const dx = mouseRef.current.x - p.x;
-        const dy = mouseRef.current.y - p.y;
+        const dy = screenMouseY - p.y;
         const dist = Math.hypot(dx, dy);
-        if (dist < 100) {
-          const force = (100 - dist) / 100;
-          p.x -= (dx / dist) * force * 2;
-          p.y -= (dy / dist) * force * 2;
+        if (dist < 120) {
+          const force = (120 - dist) / 120;
+          p.x -= (dx / dist) * force * 1.5;
+          p.y -= (dy / dist) * force * 1.5;
         }
 
-        // Reset if particles go off-screen
+        // Reset if offscreen
         if (p.y < 0) {
           p.y = height;
           p.x = Math.random() * width;
@@ -171,29 +224,35 @@ export default function BackgroundCanvas() {
           p.x = Math.random() * width;
         }
 
-        // Draw particle
         ctx.fillStyle = `rgba(199, 210, 254, ${p.alpha})`;
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
         ctx.fill();
       });
 
-      animationFrameId = requestAnimationFrame(animate);
+      animId = requestAnimationFrame(render);
     };
 
-    animate();
+    animId = requestAnimationFrame(render);
 
+    // Cleanups
     return () => {
-      window.removeEventListener("resize", handleResize);
       window.removeEventListener("mousemove", handleMouseMove);
-      cancelAnimationFrame(animationFrameId);
+      window.removeEventListener("resize", handleResize);
+      cancelAnimationFrame(animId);
+      gl.deleteProgram(program);
+      gl.deleteShader(vs);
+      gl.deleteShader(fs);
+      gl.deleteBuffer(positionBuffer);
     };
   }, []);
 
   return (
-    <canvas
-      ref={canvasRef}
-      className="fixed inset-0 w-full h-full -z-10 pointer-events-none"
-    />
+    <div className="fixed inset-0 w-full h-full z-0 overflow-hidden pointer-events-none">
+      {/* WebGL Shader Canvas */}
+      <canvas ref={glCanvasRef} className="absolute inset-0 w-full h-full block" />
+      {/* 2D Particles Overlay */}
+      <canvas ref={particlesCanvasRef} className="absolute inset-0 w-full h-full block opacity-30" />
+    </div>
   );
 }

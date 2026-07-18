@@ -98,7 +98,7 @@ export default function Home() {
       {isLoading ? (
         <LoadingScreen onComplete={() => setIsLoading(false)} />
       ) : (
-        <div className="relative min-h-screen bg-bg-dark text-white selection:bg-brand-primary/30 selection:text-white antialiased overflow-hidden">
+        <div className="relative min-h-screen text-white selection:bg-brand-primary/30 selection:text-white antialiased overflow-hidden">
           {/* Ambient Interactive Shaders & Particles */}
           <BackgroundCanvas />
 
